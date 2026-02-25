@@ -220,21 +220,13 @@ void main(){
     float a2f=-0.5*RS/(r2*r2)-1.5*RS*L22/(r2*r2*r2*r2);
     vel=hv+rh2*a2f*(dt*.5);
 
-    // Segment closest-approach check (catches horizon skipping)
-    vec3 seg=np-pos;
-    float tc=-dot(pos,seg)/max(dot(seg,seg),1e-10);
-    tc=clamp(tc,0.,1.);
-    float cR=length(pos+seg*tc);
-    if(cR<RS || r2<RS){alpha=1.;break;} // horizon: keep accumulated disk color
-
-    // --- Disk plane crossing (THE key to Interstellar look) ---
+    // --- Disk plane crossing BEFORE horizon check ---
+    // Must happen first so near-side disk renders in front of the shadow
     bool crossed=(pos.y*np.y<0.);
-    pos=np;
-
     if(crossed && alpha<.97){
-      // Find exact y=0 crossing
-      vec3 cp=pos;
-      if(abs(vel.y)>1e-5) cp=pos-vel*(pos.y/vel.y);
+      // Find exact y=0 crossing via segment interpolation
+      float tCross=pos.y/(pos.y-np.y);
+      vec3 cp=mix(pos,np,tCross);
       cp.y=0.;
       float cr=length(cp.xz);
 
@@ -251,6 +243,15 @@ void main(){
         }
       }
     }
+
+    // Segment closest-approach check (catches horizon skipping)
+    vec3 seg=np-pos;
+    float tc=-dot(pos,seg)/max(dot(seg,seg),1e-10);
+    tc=clamp(tc,0.,1.);
+    float cR=length(pos+seg*tc);
+    if(cR<RS || r2<RS){alpha=1.;break;} // horizon: keep accumulated disk color
+
+    pos=np;
 
     // Volumetric disk glow (for rays grazing the disk)
     float rn=length(pos);
