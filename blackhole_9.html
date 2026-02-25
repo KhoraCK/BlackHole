@@ -38,8 +38,12 @@
 <script>
 const C=document.createElement('canvas');document.body.appendChild(C);
 const gl=C.getContext('webgl')||C.getContext('experimental-webgl');
-function resize(){const d=Math.min(devicePixelRatio,1.25);C.width=innerWidth*d|0;C.height=innerHeight*d|0;C.style.width=innerWidth+'px';C.style.height=innerHeight+'px';gl.viewport(0,0,C.width,C.height)}
-addEventListener('resize',resize);resize();
+const DPR_FULL=Math.min(devicePixelRatio,1.25),DPR_FAST=Math.min(devicePixelRatio,0.55);
+let curDPR=DPR_FULL;
+function resize(dpr){dpr=dpr||curDPR;curDPR=dpr;C.width=innerWidth*dpr|0;C.height=innerHeight*dpr|0;C.style.width=innerWidth+'px';C.style.height=innerHeight+'px';gl.viewport(0,0,C.width,C.height)}
+let idleT=0;
+function onMove(){if(curDPR!==DPR_FAST)resize(DPR_FAST);clearTimeout(idleT);idleT=setTimeout(()=>resize(DPR_FULL),180)}
+addEventListener('resize',()=>resize());resize();
 function mkS(s,t){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(o));return null}return o}
 function mkP(v,f){const p=gl.createProgram();gl.attachShader(p,mkS(v,gl.VERTEX_SHADER));gl.attachShader(p,mkS(f,gl.FRAGMENT_SHADER));gl.linkProgram(p);return p}
 const qb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,qb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
@@ -54,7 +58,7 @@ uniform vec3 uCam;
 #define RS 3.0
 #define DISK_IN 9.0
 #define DISK_OUT 35.0
-#define STEPS 500
+#define STEPS 350
 // Shadow boundary: b_crit = RS * sqrt(27)/2 for Schwarzschild
 // = 3 * 2.598 = 7.794
 #define B_CRIT 7.794
@@ -180,6 +184,16 @@ void main(){
   }
 
   // ==============================================
+  // SHADOW EARLY-OUT (with correct tone mapping)
+  // ==============================================
+  float b_impact=length(cross(pos,vel));
+  if(b_impact<B_CRIT*.45){
+    // Tone-mapped black: ACES maps 0 -> 0.03/0.14 = 0.2143, gamma -> 0.247
+    gl_FragColor=vec4(vec3(.247),.0);
+    return;
+  }
+
+  // ==============================================
   // GEODESIC RAY MARCH
   // ==============================================
   float photonRingAccum = 0.0;
@@ -188,7 +202,7 @@ void main(){
     float r=length(pos);
 
     if(r<RS*.9){alpha=1.;break;} // horizon: keep accumulated disk color
-    if(r>zoneR+5.&&i>8) break;
+    if(r>zoneR+2.&&dot(pos,vel)>0.) break; // escaping: moving outward past zone
     if(alpha>.97) break;
 
     // Geodesic force: Schwarzschild null geodesic
@@ -250,9 +264,9 @@ void main(){
 
     pos=np;
 
-    // Volumetric disk glow (for rays grazing the disk)
+    // Volumetric disk glow (for rays grazing the disk — tighter threshold)
     float rn=length(pos);
-    if(abs(pos.y)<0.8 && rn>DISK_IN*.8 && rn<DISK_OUT+2. && rn>RS*1.5){
+    if(abs(pos.y)<0.35 && rn>DISK_IN*.9 && rn<DISK_OUT+1. && rn>RS*1.5){
       vec4 dv=disk(pos,vel);
       if(dv.a>.003){
         float w=dv.a*(1.-alpha)*dt*5.;
@@ -297,11 +311,11 @@ const uT=gl.getUniformLocation(prog,'uTime'),uR=gl.getUniformLocation(prog,'uRes
 let th=.4,ph=.25,di=55, tT=.4,tP=.25,tD=55;
 let dr=false,lx=0,ly=0,pd=0;
 C.onmousedown=e=>{dr=true;lx=e.clientX;ly=e.clientY};
-onmousemove=e=>{if(!dr)return;tT-=(e.clientX-lx)*.005;tP+=(e.clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.clientX;ly=e.clientY};
+onmousemove=e=>{if(!dr)return;tT-=(e.clientX-lx)*.005;tP+=(e.clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.clientX;ly=e.clientY;onMove()};
 onmouseup=()=>dr=false;
-C.onwheel=e=>{e.preventDefault();tD*=1+e.deltaY*.0012;tD=Math.max(8,Math.min(200,tD))};
+C.onwheel=e=>{e.preventDefault();tD*=1+e.deltaY*.0012;tD=Math.max(8,Math.min(200,tD));onMove()};
 C.addEventListener('touchstart',e=>{if(e.touches.length===1){dr=true;lx=e.touches[0].clientX;ly=e.touches[0].clientY}else if(e.touches.length===2){dr=false;pd=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY)}},{passive:false});
-C.addEventListener('touchmove',e=>{e.preventDefault();if(e.touches.length===1&&dr){tT-=(e.touches[0].clientX-lx)*.005;tP+=(e.touches[0].clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.touches[0].clientX;ly=e.touches[0].clientY}else if(e.touches.length===2){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);tD*=1-(d-pd)*.004;tD=Math.max(8,Math.min(200,tD));pd=d}},{passive:false});
+C.addEventListener('touchmove',e=>{e.preventDefault();onMove();if(e.touches.length===1&&dr){tT-=(e.touches[0].clientX-lx)*.005;tP+=(e.touches[0].clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.touches[0].clientX;ly=e.touches[0].clientY}else if(e.touches.length===2){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);tD*=1-(d-pd)*.004;tD=Math.max(8,Math.min(200,tD));pd=d}},{passive:false});
 C.addEventListener('touchend',()=>dr=false);
 
 const t0=performance.now();let ok=false;
