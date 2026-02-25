@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Trou Noir — Singularité</title>
+<title>Trou Noir — Singularité v2</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
@@ -28,7 +28,7 @@
 <body>
 <div id="ld"><h2>COURBURE DE L'ESPACE-TEMPS...</h2></div>
 <div class="vig"></div>
-<div id="title"><h1>Singularité</h1><p>Lentille Gravitationnelle</p></div>
+<div id="title"><h1>Singularité</h1><p>Lentille Gravitationnelle — v2</p></div>
 <div id="hud">
   <div class="m">MASSE : <span>4.3 × 10⁶ M☉</span></div>
   <div class="m">DISTANCE : <span id="hd">—</span></div>
@@ -38,8 +38,12 @@
 <script>
 const C=document.createElement('canvas');document.body.appendChild(C);
 const gl=C.getContext('webgl')||C.getContext('experimental-webgl');
-function resize(){const d=Math.min(devicePixelRatio,1.5);C.width=innerWidth*d|0;C.height=innerHeight*d|0;C.style.width=innerWidth+'px';C.style.height=innerHeight+'px';gl.viewport(0,0,C.width,C.height)}
-addEventListener('resize',resize);resize();
+const DPR_FULL=Math.min(devicePixelRatio,1.25),DPR_FAST=Math.min(devicePixelRatio,0.55);
+let curDPR=DPR_FULL;
+function resize(dpr){dpr=dpr||curDPR;curDPR=dpr;C.width=innerWidth*dpr|0;C.height=innerHeight*dpr|0;C.style.width=innerWidth+'px';C.style.height=innerHeight+'px';gl.viewport(0,0,C.width,C.height)}
+let idleT=0;
+function onMove(){if(curDPR!==DPR_FAST)resize(DPR_FAST);clearTimeout(idleT);idleT=setTimeout(()=>resize(DPR_FULL),180)}
+addEventListener('resize',()=>resize());resize();
 function mkS(s,t){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(o));return null}return o}
 function mkP(v,f){const p=gl.createProgram();gl.attachShader(p,mkS(v,gl.VERTEX_SHADER));gl.attachShader(p,mkS(f,gl.FRAGMENT_SHADER));gl.linkProgram(p);return p}
 const qb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,qb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
@@ -53,8 +57,8 @@ uniform vec3 uCam;
 // Black hole parameters — physically accurate Schwarzschild
 #define RS 3.0
 #define DISK_IN 9.0
-#define DISK_OUT 25.0
-#define STEPS 500
+#define DISK_OUT 35.0
+#define STEPS 350
 // Shadow boundary: b_crit = RS * sqrt(27)/2 for Schwarzschild
 // = 3 * 2.598 = 7.794
 #define B_CRIT 7.794
@@ -63,7 +67,7 @@ uniform vec3 uCam;
 // --- Noise ---
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
-float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<5;i++){v+=a*noise(p);p*=2.07;a*=.48;}return v;}
+float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<3;i++){v+=a*noise(p);p*=2.1;a*=.5;}return v;}
 
 // --- Stars + Nebulae ---
 vec3 stars(vec3 rd){
@@ -77,8 +81,8 @@ vec3 stars(vec3 rd){
   // Milky way
   c+=vec3(.1,.07,.15)*exp(-ph*ph*3.5)*fbm(s*5.)*.7;
   // Stars
-  for(int L=0;L<3;L++){
-    float sc=50.+float(L)*90.;
+  for(int L=0;L<2;L++){
+    float sc=60.+float(L)*120.;
     vec2 su=s*sc, ci=floor(su), cf=fract(su)-.5;
     float h=hash(ci+float(L)*77.);
     if(h>.88){
@@ -96,8 +100,8 @@ vec3 stars(vec3 rd){
 vec4 disk(vec3 p, vec3 v){
   float r=length(p.xz);
   if(r<DISK_IN*.92||r>DISK_OUT*1.1) return vec4(0);
-  // Thin disk with slight flare
-  float sh=r*(.012+.02*smoothstep(DISK_IN,DISK_OUT,r));
+  // Very thin disk with slight flare
+  float sh=r*(.005+.008*smoothstep(DISK_IN,DISK_OUT,r));
   float dy=abs(p.y);
   if(dy>sh*5.) return vec4(0);
   float vf=exp(-.5*dy*dy/(sh*sh));
@@ -113,14 +117,12 @@ vec4 disk(vec3 p, vec3 v){
   sd*=smoothstep(DISK_IN-.5,DISK_IN+1.,r);
   sd*=smoothstep(DISK_OUT+.5,DISK_OUT-3.,r);
 
-  // Spirals + turbulence
+  // Spirals + turbulence (simplified)
   float sp1=sin(ra*2.-log(r+1.)*5.)*.5+.5;
   float sp2=sin(ra*5.+log(r+1.)*3.+1.5)*.5+.5;
   float tb=fbm(vec2(ra*3.,r*2.)+uTime*.08);
-  float ft=noise(vec2(ra*8.+uTime*.15,r*4.));
-  float hs=smoothstep(.7,1.,noise(vec2(ra*.8+uTime*.03,r*.4)));
 
-  float dens=sd*(.4+sp1*.22+sp2*.1+tb*.18+ft*.05+hs*.15)*vf;
+  float dens=sd*(.45+sp1*.22+sp2*.1+tb*.2)*vf;
 
   // Temperature: T ~ r^(-3/4)
   float rR=DISK_IN/r;
@@ -163,7 +165,7 @@ void main(){
   // ==============================================
   // SKIP EMPTY SPACE
   // ==============================================
-  float zoneR = DISK_OUT + 12.0; // 37 units
+  float zoneR = DISK_OUT + 12.0; // 47 units
   vec3 color = vec3(0);
   float alpha = 0.0;
   int nHit = 0;
@@ -182,16 +184,25 @@ void main(){
   }
 
   // ==============================================
+  // SHADOW EARLY-OUT (with correct tone mapping)
+  // ==============================================
+  float b_impact=length(cross(pos,vel));
+  if(b_impact<B_CRIT*.45){
+    // Tone-mapped black: ACES maps 0 -> 0.03/0.14 = 0.2143, gamma -> 0.247
+    gl_FragColor=vec4(vec3(.247),.0);
+    return;
+  }
+
+  // ==============================================
   // GEODESIC RAY MARCH
   // ==============================================
-  // Photon ring glow for rays just outside the shadow
   float photonRingAccum = 0.0;
 
   for(int i=0; i<STEPS; i++){
     float r=length(pos);
 
     if(r<RS*.9){alpha=1.;break;} // horizon: keep accumulated disk color
-    if(r>zoneR+5.&&i>8) break;
+    if(r>zoneR+2.&&dot(pos,vel)>0.) break; // escaping: moving outward past zone
     if(alpha>.97) break;
 
     // Geodesic force: Schwarzschild null geodesic
@@ -201,9 +212,9 @@ void main(){
     float acc=-0.5*RS/(r*r) - 1.5*RS*L2/(r*r*r*r);
     vec3 a1=rh*acc;
 
-    // Adaptive step
-    float dt=0.5*r/zoneR;
-    dt=clamp(dt, 0.003, 0.8);
+    // Adaptive step — aggressive far from BH (gravity negligible), fine near photon sphere
+    float dt=1.0*r/zoneR;
+    dt=clamp(dt, 0.003, 2.0);
     // Fine near photon sphere — large enough for orbital progress
     dt=mix(dt, 0.05, smoothstep(RS*3., RS*1.5, r));
     // Fine near disk plane
@@ -253,9 +264,9 @@ void main(){
 
     pos=np;
 
-    // Volumetric disk glow (for rays grazing the disk)
+    // Volumetric disk glow (for rays grazing the disk — tighter threshold)
     float rn=length(pos);
-    if(abs(pos.y)<0.8 && rn>DISK_IN*.8 && rn<DISK_OUT+2. && rn>RS*1.5){
+    if(abs(pos.y)<0.35 && rn>DISK_IN*.9 && rn<DISK_OUT+1. && rn>RS*1.5){
       vec4 dv=disk(pos,vel);
       if(dv.a>.003){
         float w=dv.a*(1.-alpha)*dt*5.;
@@ -300,11 +311,11 @@ const uT=gl.getUniformLocation(prog,'uTime'),uR=gl.getUniformLocation(prog,'uRes
 let th=.4,ph=.25,di=55, tT=.4,tP=.25,tD=55;
 let dr=false,lx=0,ly=0,pd=0;
 C.onmousedown=e=>{dr=true;lx=e.clientX;ly=e.clientY};
-onmousemove=e=>{if(!dr)return;tT-=(e.clientX-lx)*.005;tP+=(e.clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.clientX;ly=e.clientY};
+onmousemove=e=>{if(!dr)return;tT-=(e.clientX-lx)*.005;tP+=(e.clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.clientX;ly=e.clientY;onMove()};
 onmouseup=()=>dr=false;
-C.onwheel=e=>{e.preventDefault();tD*=1+e.deltaY*.0012;tD=Math.max(8,Math.min(200,tD))};
+C.onwheel=e=>{e.preventDefault();tD*=1+e.deltaY*.0012;tD=Math.max(8,Math.min(200,tD));onMove()};
 C.addEventListener('touchstart',e=>{if(e.touches.length===1){dr=true;lx=e.touches[0].clientX;ly=e.touches[0].clientY}else if(e.touches.length===2){dr=false;pd=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY)}},{passive:false});
-C.addEventListener('touchmove',e=>{e.preventDefault();if(e.touches.length===1&&dr){tT-=(e.touches[0].clientX-lx)*.005;tP+=(e.touches[0].clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.touches[0].clientX;ly=e.touches[0].clientY}else if(e.touches.length===2){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);tD*=1-(d-pd)*.004;tD=Math.max(8,Math.min(200,tD));pd=d}},{passive:false});
+C.addEventListener('touchmove',e=>{e.preventDefault();onMove();if(e.touches.length===1&&dr){tT-=(e.touches[0].clientX-lx)*.005;tP+=(e.touches[0].clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.touches[0].clientX;ly=e.touches[0].clientY}else if(e.touches.length===2){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);tD*=1-(d-pd)*.004;tD=Math.max(8,Math.min(200,tD));pd=d}},{passive:false});
 C.addEventListener('touchend',()=>dr=false);
 
 const t0=performance.now();let ok=false;
