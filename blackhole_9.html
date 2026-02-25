@@ -54,7 +54,7 @@ uniform vec3 uCam;
 #define RS 3.0
 #define DISK_IN 9.0
 #define DISK_OUT 35.0
-#define STEPS 400
+#define STEPS 500
 // Shadow boundary: b_crit = RS * sqrt(27)/2 for Schwarzschild
 // = 3 * 2.598 = 7.794
 #define B_CRIT 7.794
@@ -205,9 +205,9 @@ void main(){
     float acc=-0.5*RS/(r*r) - 1.5*RS*L2/(r*r*r*r);
     vec3 a1=rh*acc;
 
-    // Adaptive step (tuned for larger zone)
-    float dt=0.6*r/zoneR;
-    dt=clamp(dt, 0.003, 1.0);
+    // Adaptive step — aggressive far from BH (gravity negligible), fine near photon sphere
+    float dt=1.0*r/zoneR;
+    dt=clamp(dt, 0.003, 2.0);
     // Fine near photon sphere — large enough for orbital progress
     dt=mix(dt, 0.05, smoothstep(RS*3., RS*1.5, r));
     // Fine near disk plane
