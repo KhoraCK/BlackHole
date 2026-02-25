@@ -179,13 +179,6 @@ void main(){
     if(te>0.) pos+=vel*te;
   }
 
-  // Early-out for deep shadow (saves hundreds of iterations per pixel)
-  float b_impact=length(cross(pos,vel));
-  if(b_impact<B_CRIT*.65){
-    gl_FragColor=vec4(0,0,0,1);
-    return;
-  }
-
   // ==============================================
   // GEODESIC RAY MARCH
   // ==============================================
