@@ -174,9 +174,12 @@ void main(){
     float bS=dot(pos,vel), cS=dot(pos,pos)-zoneR*zoneR;
     float disc=bS*bS-cS;
     if(disc<0.){
-      // Misses everything
+      // Misses everything — use same ACES tone mapping as main path
       vec3 sky=stars(normalize(vel));
-      gl_FragColor=vec4(pow(sky/(1.+sky),vec3(.88)),1);
+      sky*=1.3;
+      vec3 xs=sky;
+      sky=(xs*(2.51*xs+.03))/(xs*(2.43*xs+.59)+.14);
+      gl_FragColor=vec4(pow(clamp(sky,0.,1.),vec3(.88)),1);
       return;
     }
     float te=-bS-sqrt(disc);
