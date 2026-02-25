@@ -50,10 +50,10 @@ uniform float uTime;
 uniform vec2 uRes;
 uniform vec3 uCam;
 
-// Black hole parameters — scaled up for visibility
+// Black hole parameters — physically accurate Schwarzschild
 #define RS 3.0
-#define DISK_IN 5.0
-#define DISK_OUT 18.0
+#define DISK_IN 9.0
+#define DISK_OUT 25.0
 #define STEPS 300
 // Shadow boundary: b_crit = RS * sqrt(27)/2 for Schwarzschild
 // = 3 * 2.598 = 7.794
@@ -95,7 +95,7 @@ vec3 stars(vec3 rd){
 // --- Accretion Disk ---
 vec4 disk(vec3 p, vec3 v){
   float r=length(p.xz);
-  if(r<DISK_IN*.7||r>DISK_OUT*1.1) return vec4(0);
+  if(r<DISK_IN*.92||r>DISK_OUT*1.1) return vec4(0);
   // Thin disk with slight flare
   float sh=r*(.012+.02*smoothstep(DISK_IN,DISK_OUT,r));
   float dy=abs(p.y);
@@ -110,8 +110,8 @@ vec4 disk(vec3 p, vec3 v){
   float rN=(r-DISK_IN)/(DISK_OUT-DISK_IN);
   float sd=pow(rN+.05,.3)*exp(-rN*2.);
   sd=max(sd,.1);
-  sd*=smoothstep(DISK_IN-.2,DISK_IN+.5,r);
-  sd*=smoothstep(DISK_OUT+.3,DISK_OUT-2.,r);
+  sd*=smoothstep(DISK_IN-.5,DISK_IN+1.,r);
+  sd*=smoothstep(DISK_OUT+.5,DISK_OUT-3.,r);
 
   // Spirals + turbulence
   float sp1=sin(ra*2.-log(r+1.)*5.)*.5+.5;
@@ -144,9 +144,9 @@ vec4 disk(vec3 p, vec3 v){
   else c=mix(c,c*vec3(1.4,.65,.4),clamp((1.-dop)*.35,0.,.5));
 
   float br=dens*(2.+temp*5.)*db;
-  // Inner glow
-  br+=exp(-(r-DISK_IN)*3.)*4.*dens;
-  c+=vec3(.95,.85,.6)*exp(-(r-DISK_IN)*3.)*dens*.5;
+  // Inner glow (ISCO edge heating)
+  br+=exp(-(r-DISK_IN)*1.8)*5.*dens;
+  c+=vec3(.95,.85,.6)*exp(-(r-DISK_IN)*1.8)*dens*.6;
   return vec4(c*min(br,25.), clamp(dens,0.,1.));
 }
 
@@ -167,8 +167,8 @@ void main(){
   float b_ray = length(cross(pos, vel)) / length(vel);
 
   // Rays with b < b_crit will be captured: pure black
-  // Small margin (0.98) to leave room for the photon ring glow at the edge
-  if(b_ray < B_CRIT * 0.98) {
+  // Full shadow boundary — photon ring handled in ray march
+  if(b_ray < B_CRIT) {
     gl_FragColor = vec4(0,0,0,1);
     return;
   }
@@ -176,7 +176,7 @@ void main(){
   // ==============================================
   // SKIP EMPTY SPACE
   // ==============================================
-  float zoneR = DISK_OUT + 12.0; // 30 units
+  float zoneR = DISK_OUT + 12.0; // 37 units
   vec3 color = vec3(0);
   float alpha = 0.0;
   int nHit = 0;
@@ -220,7 +220,7 @@ void main(){
     // Fine near photon sphere
     dt=mix(dt, 0.006, smoothstep(RS*6., RS*1.6, r));
     // Fine near disk plane
-    if(abs(pos.y)<0.6 && r>DISK_IN*.4 && r<DISK_OUT+2.)
+    if(abs(pos.y)<0.6 && r>DISK_IN*.8 && r<DISK_OUT+2.)
       dt=min(dt, 0.02);
 
     // Velocity Verlet
@@ -252,7 +252,7 @@ void main(){
       float cr=length(cp.xz);
 
       // Sample disk — allow wider range for lensed images
-      if(cr>DISK_IN*.5 && cr<DISK_OUT*1.5){
+      if(cr>DISK_IN*.85 && cr<DISK_OUT*1.5){
         vec4 d=disk(cp,vel);
         if(d.a>0.001){
           float dim=exp(-float(nHit)*.4);
@@ -267,7 +267,7 @@ void main(){
 
     // Volumetric disk glow (for rays grazing the disk)
     float rn=length(pos);
-    if(abs(pos.y)<0.8 && rn>DISK_IN*.4 && rn<DISK_OUT+2. && rn>RS*1.5){
+    if(abs(pos.y)<0.8 && rn>DISK_IN*.8 && rn<DISK_OUT+2. && rn>RS*1.5){
       vec4 dv=disk(pos,vel);
       if(dv.a>.003){
         float w=dv.a*(1.-alpha)*dt*5.;
@@ -276,14 +276,14 @@ void main(){
       }
     }
 
-    // Photon ring glow (very thin bright ring at shadow edge)
-    if(rn>RS*1.1 && rn<RS*2.5){
+    // Photon ring glow (thin bright ring at photon sphere r = 1.5*RS)
+    if(rn>RS*1.2 && rn<RS*2.2){
       float prR=length(pos.xz);
       float prD=abs(prR-RS*1.5);
-      float prG=exp(-prD*prD*25.)*exp(-pos.y*pos.y*10.);
-      if(prG>.005){
-        color+=vec3(1,.8,.4)*prG*2.*(1.-alpha)*dt*4.;
-        alpha+=prG*(1.-alpha)*dt;
+      float prG=exp(-prD*prD*50.)*exp(-pos.y*pos.y*15.);
+      if(prG>.003){
+        color+=vec3(1,.85,.5)*prG*3.5*(1.-alpha)*dt*5.;
+        alpha+=prG*(1.-alpha)*dt*1.5;
       }
     }
   }
@@ -309,7 +309,7 @@ gl.useProgram(prog);
 const pL=gl.getAttribLocation(prog,'p');gl.enableVertexAttribArray(pL);gl.vertexAttribPointer(pL,2,gl.FLOAT,false,0,0);
 const uT=gl.getUniformLocation(prog,'uTime'),uR=gl.getUniformLocation(prog,'uRes'),uC=gl.getUniformLocation(prog,'uCam');
 
-let th=.4,ph=.25,di=45, tT=.4,tP=.25,tD=45;
+let th=.4,ph=.25,di=55, tT=.4,tP=.25,tD=55;
 let dr=false,lx=0,ly=0,pd=0;
 C.onmousedown=e=>{dr=true;lx=e.clientX;ly=e.clientY};
 onmousemove=e=>{if(!dr)return;tT-=(e.clientX-lx)*.005;tP+=(e.clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.clientX;ly=e.clientY};
