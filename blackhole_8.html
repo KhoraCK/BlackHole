@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trou Noir — Singularité</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#000;overflow:hidden;font-family:'Rajdhani',sans-serif;color:#fff}
+  canvas{display:block}
+  #title{position:fixed;top:24px;left:50%;transform:translateX(-50%);z-index:20;text-align:center;pointer-events:none;opacity:0;animation:fi 2s 1.5s forwards}
+  #title h1{font-family:'Orbitron',monospace;font-size:clamp(16px,2.8vw,32px);font-weight:900;letter-spacing:.35em;text-transform:uppercase;background:linear-gradient(90deg,#ff6a00,#ffd280,#ff6a00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 15px rgba(255,106,0,.4))}
+  #title p{font-size:clamp(9px,1.1vw,12px);color:rgba(255,179,71,.4);letter-spacing:.6em;margin-top:4px}
+  #hud{position:fixed;bottom:24px;left:24px;z-index:20;pointer-events:none;opacity:0;animation:fi 2s 2s forwards}
+  .m{font-family:'Orbitron',monospace;font-size:10px;color:rgba(255,130,40,.5);letter-spacing:.12em;margin-bottom:3px}
+  .m span{color:rgba(255,190,110,.85)}
+  #hint{position:fixed;bottom:24px;right:24px;z-index:20;text-align:right;pointer-events:none;opacity:0;animation:fi 2s 2.5s forwards}
+  #hint p{font-size:10px;color:rgba(255,255,255,.2);letter-spacing:.08em;margin-bottom:2px}
+  .vig{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,transparent 30%,rgba(0,0,0,.6) 100%);pointer-events:none;z-index:5}
+  #ld{position:fixed;top:0;left:0;width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;z-index:100;transition:opacity 1.8s}
+  #ld.h{opacity:0;pointer-events:none}
+  #ld h2{font-family:'Orbitron',monospace;font-size:13px;letter-spacing:.5em;color:#ff8c32;animation:p 1.5s ease-in-out infinite}
+  @keyframes p{0%,100%{opacity:.3}50%{opacity:1}}
+  @keyframes fi{to{opacity:1}}
+</style>
+</head>
+<body>
+<div id="ld"><h2>COURBURE DE L'ESPACE-TEMPS...</h2></div>
+<div class="vig"></div>
+<div id="title"><h1>Singularité</h1><p>Lentille Gravitationnelle</p></div>
+<div id="hud">
+  <div class="m">MASSE : <span>4.3 × 10⁶ M☉</span></div>
+  <div class="m">DISTANCE : <span id="hd">—</span></div>
+  <div class="m">REDSHIFT : <span id="hz">—</span></div>
+</div>
+<div id="hint"><p>GLISSER — ORBITER</p><p>MOLETTE — ZOOM</p></div>
+<script>
+const C=document.createElement('canvas');document.body.appendChild(C);
+const gl=C.getContext('webgl')||C.getContext('experimental-webgl');
+function resize(){const d=Math.min(devicePixelRatio,1.5);C.width=innerWidth*d|0;C.height=innerHeight*d|0;C.style.width=innerWidth+'px';C.style.height=innerHeight+'px';gl.viewport(0,0,C.width,C.height)}
+addEventListener('resize',resize);resize();
+function mkS(s,t){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(o));return null}return o}
+function mkP(v,f){const p=gl.createProgram();gl.attachShader(p,mkS(v,gl.VERTEX_SHADER));gl.attachShader(p,mkS(f,gl.FRAGMENT_SHADER));gl.linkProgram(p);return p}
+const qb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,qb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+
+const FS=`
+precision highp float;
+uniform float uTime;
+uniform vec2 uRes;
+uniform vec3 uCam;
+
+// Black hole parameters — scaled up for visibility
+#define RS 3.0
+#define DISK_IN 5.0
+#define DISK_OUT 18.0
+#define STEPS 300
+// Shadow boundary: b_crit = RS * sqrt(27)/2 for Schwarzschild
+// = 3 * 2.598 = 7.794
+#define B_CRIT 7.794
+#define PI 3.14159265
+
+// --- Noise ---
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<5;i++){v+=a*noise(p);p*=2.07;a*=.48;}return v;}
+
+// --- Stars + Nebulae ---
+vec3 stars(vec3 rd){
+  vec3 c=vec3(0);
+  float th=atan(rd.z,rd.x), ph=asin(clamp(rd.y,-1.,1.));
+  vec2 s=vec2(th,ph);
+  // Nebulae
+  c+=vec3(.18,.04,.28)*smoothstep(.35,.75,fbm(s*1.8+.5))*.8;
+  c+=vec3(.02,.12,.32)*smoothstep(.4,.8,fbm(s*2.7-2.))*.55;
+  c+=vec3(.28,.06,.02)*smoothstep(.42,.78,fbm(s*1.3+3.5))*.5;
+  // Milky way
+  c+=vec3(.1,.07,.15)*exp(-ph*ph*3.5)*fbm(s*5.)*.7;
+  // Stars
+  for(int L=0;L<3;L++){
+    float sc=50.+float(L)*90.;
+    vec2 su=s*sc, ci=floor(su), cf=fract(su)-.5;
+    float h=hash(ci+float(L)*77.);
+    if(h>.88){
+      vec2 o=vec2(hash(ci*1.3+float(L)*11.),hash(ci*2.7+float(L)*13.))-.5;
+      float d=length(cf-o*.35), b=smoothstep(.08,.0,d)*(.4+.6*h);
+      float tw=.7+.3*sin(uTime*(1.+h*3.)+h*80.);
+      vec3 sc2=h>.97?vec3(1,.65,.35):h>.94?vec3(.5,.7,1):vec3(.92,.9,.84);
+      c+=sc2*b*tw;
+    }
+  }
+  return c;
+}
+
+// --- Accretion Disk ---
+vec4 disk(vec3 p, vec3 v){
+  float r=length(p.xz);
+  if(r<DISK_IN*.7||r>DISK_OUT*1.1) return vec4(0);
+  // Thin disk with slight flare
+  float sh=r*(.012+.02*smoothstep(DISK_IN,DISK_OUT,r));
+  float dy=abs(p.y);
+  if(dy>sh*5.) return vec4(0);
+  float vf=exp(-.5*dy*dy/(sh*sh));
+
+  float ang=atan(p.z,p.x);
+  float omega=1./pow(r,1.5);
+  float ra=ang+uTime*omega*1.5;
+
+  // Density profile
+  float rN=(r-DISK_IN)/(DISK_OUT-DISK_IN);
+  float sd=pow(rN+.05,.3)*exp(-rN*2.);
+  sd=max(sd,.1);
+  sd*=smoothstep(DISK_IN-.2,DISK_IN+.5,r);
+  sd*=smoothstep(DISK_OUT+.3,DISK_OUT-2.,r);
+
+  // Spirals + turbulence
+  float sp1=sin(ra*2.-log(r+1.)*5.)*.5+.5;
+  float sp2=sin(ra*5.+log(r+1.)*3.+1.5)*.5+.5;
+  float tb=fbm(vec2(ra*3.,r*2.)+uTime*.08);
+  float ft=noise(vec2(ra*8.+uTime*.15,r*4.));
+  float hs=smoothstep(.7,1.,noise(vec2(ra*.8+uTime*.03,r*.4)));
+
+  float dens=sd*(.4+sp1*.22+sp2*.1+tb*.18+ft*.05+hs*.15)*vf;
+
+  // Temperature: T ~ r^(-3/4)
+  float rR=DISK_IN/r;
+  float tp=pow(rR,.75)*pow(max(1.-sqrt(rR),.01),.25);
+  float temp=clamp(pow(clamp(tp,0.,1.),.6)*.85+.15*exp(-(r-DISK_IN)*1.2),0.,1.);
+
+  // Blackbody color
+  vec3 c;
+  if(temp>.85) c=mix(vec3(1,.82,.5),vec3(.85,.92,1),(temp-.85)/.15);
+  else if(temp>.65) c=mix(vec3(1,.58,.18),vec3(1,.82,.5),(temp-.65)/.2);
+  else if(temp>.4) c=mix(vec3(.92,.28,.04),vec3(1,.58,.18),(temp-.4)/.25);
+  else if(temp>.15) c=mix(vec3(.5,.08,.01),vec3(.92,.28,.04),(temp-.15)/.25);
+  else c=mix(vec3(.08,.01,0),vec3(.5,.08,.01),temp/.15);
+
+  // Doppler beaming
+  vec3 vd=normalize(vec3(-sin(ang),0,cos(ang)));
+  float dop=1.+dot(normalize(v),vd)*omega*r*2.5;
+  dop=clamp(dop,.2,4.);
+  float db=pow(dop,3.);
+  if(dop>1.) c=mix(c,c*vec3(.75,.88,1.3),clamp((dop-1.)*.25,0.,.5));
+  else c=mix(c,c*vec3(1.4,.65,.4),clamp((1.-dop)*.35,0.,.5));
+
+  float br=dens*(2.+temp*5.)*db;
+  // Inner glow
+  br+=exp(-(r-DISK_IN)*3.)*4.*dens;
+  c+=vec3(.95,.85,.6)*exp(-(r-DISK_IN)*3.)*dens*.5;
+  return vec4(c*min(br,25.), clamp(dens,0.,1.));
+}
+
+mat3 camMat(vec3 e,vec3 t){vec3 f=normalize(t-e),r=normalize(cross(f,vec3(0,1,0))),u=cross(r,f);return mat3(r,u,f);}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*uRes)/uRes.y;
+  mat3 cm=camMat(uCam,vec3(0));
+  vec3 rd=cm*normalize(vec3(uv,1.2));
+  vec3 pos=uCam;
+  vec3 vel=rd;
+  float camDist=length(pos);
+
+  // ==============================================
+  // SHADOW TEST: analytic, guaranteed black center
+  // ==============================================
+  // Impact parameter for this ray
+  float b_ray = length(cross(pos, vel)) / length(vel);
+
+  // Rays with b < b_crit will be captured: pure black
+  // Small margin (0.98) to leave room for the photon ring glow at the edge
+  if(b_ray < B_CRIT * 0.98) {
+    gl_FragColor = vec4(0,0,0,1);
+    return;
+  }
+
+  // ==============================================
+  // SKIP EMPTY SPACE
+  // ==============================================
+  float zoneR = DISK_OUT + 12.0; // 30 units
+  vec3 color = vec3(0);
+  float alpha = 0.0;
+  int nHit = 0;
+
+  if(camDist > zoneR) {
+    float bS=dot(pos,vel), cS=dot(pos,pos)-zoneR*zoneR;
+    float disc=bS*bS-cS;
+    if(disc<0.){
+      // Misses everything
+      vec3 sky=stars(normalize(vel));
+      gl_FragColor=vec4(pow(sky/(1.+sky),vec3(.88)),1);
+      return;
+    }
+    float te=-bS-sqrt(disc);
+    if(te>0.) pos+=vel*te;
+  }
+
+  // ==============================================
+  // GEODESIC RAY MARCH
+  // ==============================================
+  // Photon ring glow for rays just outside the shadow
+  float photonRingAccum = 0.0;
+
+  for(int i=0; i<STEPS; i++){
+    float r=length(pos);
+
+    if(r<RS*.9){color=vec3(0);alpha=1.;break;} // safety
+    if(r>zoneR+5.&&i>8) break;
+    if(alpha>.97) break;
+
+    // Geodesic force: Schwarzschild null geodesic
+    vec3 rh=pos/r;
+    vec3 Lv=cross(pos,vel);
+    float L2=dot(Lv,Lv);
+    float acc=-0.5*RS/(r*r) - 1.5*RS*L2/(r*r*r*r);
+    vec3 a1=rh*acc;
+
+    // Adaptive step
+    float dt=0.4*r/zoneR;
+    dt=clamp(dt, 0.003, 0.6);
+    // Fine near photon sphere
+    dt=mix(dt, 0.006, smoothstep(RS*6., RS*1.6, r));
+    // Fine near disk plane
+    if(abs(pos.y)<0.6 && r>DISK_IN*.4 && r<DISK_OUT+2.)
+      dt=min(dt, 0.02);
+
+    // Velocity Verlet
+    vec3 hv=vel+a1*(dt*.5);
+    vec3 np=pos+hv*dt;
+    float r2=length(np);
+    vec3 rh2=np/max(r2,.001);
+    vec3 Lv2=cross(np,hv);
+    float L22=dot(Lv2,Lv2);
+    float a2f=-0.5*RS/(r2*r2)-1.5*RS*L22/(r2*r2*r2*r2);
+    vel=hv+rh2*a2f*(dt*.5);
+
+    // Segment closest-approach check (catches horizon skipping)
+    vec3 seg=np-pos;
+    float tc=-dot(pos,seg)/max(dot(seg,seg),1e-10);
+    tc=clamp(tc,0.,1.);
+    float cR=length(pos+seg*tc);
+    if(cR<RS || r2<RS){color=vec3(0);alpha=1.;break;}
+
+    // --- Disk plane crossing (THE key to Interstellar look) ---
+    bool crossed=(pos.y*np.y<0.);
+    pos=np;
+
+    if(crossed && alpha<.97){
+      // Find exact y=0 crossing
+      vec3 cp=pos;
+      if(abs(vel.y)>1e-5) cp=pos-vel*(pos.y/vel.y);
+      cp.y=0.;
+      float cr=length(cp.xz);
+
+      // Sample disk — allow wider range for lensed images
+      if(cr>DISK_IN*.5 && cr<DISK_OUT*1.5){
+        vec4 d=disk(cp,vel);
+        if(d.a>0.001){
+          float dim=exp(-float(nHit)*.4);
+          float w=d.a*(1.-alpha)*dim;
+          w=min(w, 1.-alpha);
+          color+=d.rgb*w;
+          alpha+=w*.93;
+          nHit++;
+        }
+      }
+    }
+
+    // Volumetric disk glow (for rays grazing the disk)
+    float rn=length(pos);
+    if(abs(pos.y)<0.8 && rn>DISK_IN*.4 && rn<DISK_OUT+2. && rn>RS*1.5){
+      vec4 dv=disk(pos,vel);
+      if(dv.a>.003){
+        float w=dv.a*(1.-alpha)*dt*5.;
+        color+=dv.rgb*w;
+        alpha+=w;
+      }
+    }
+
+    // Photon ring glow (very thin bright ring at shadow edge)
+    if(rn>RS*1.1 && rn<RS*2.5){
+      float prR=length(pos.xz);
+      float prD=abs(prR-RS*1.5);
+      float prG=exp(-prD*prD*25.)*exp(-pos.y*pos.y*10.);
+      if(prG>.005){
+        color+=vec3(1,.8,.4)*prG*2.*(1.-alpha)*dt*4.;
+        alpha+=prG*(1.-alpha)*dt;
+      }
+    }
+  }
+
+  // Background sky (lensed)
+  if(alpha<.97){
+    vec3 sky=stars(normalize(vel));
+    color+=sky*(1.-alpha);
+  }
+
+  // ACES tone mapping
+  color*=1.3;
+  vec3 x=color;
+  color=(x*(2.51*x+.03))/(x*(2.43*x+.59)+.14);
+  color=pow(clamp(color,0.,1.),vec3(.88));
+
+  gl_FragColor=vec4(color,1);
+}
+`;
+
+const prog=mkP('attribute vec2 p;void main(){gl_Position=vec4(p,0,1);}',FS);
+gl.useProgram(prog);
+const pL=gl.getAttribLocation(prog,'p');gl.enableVertexAttribArray(pL);gl.vertexAttribPointer(pL,2,gl.FLOAT,false,0,0);
+const uT=gl.getUniformLocation(prog,'uTime'),uR=gl.getUniformLocation(prog,'uRes'),uC=gl.getUniformLocation(prog,'uCam');
+
+let th=.4,ph=.25,di=45, tT=.4,tP=.25,tD=45;
+let dr=false,lx=0,ly=0,pd=0;
+C.onmousedown=e=>{dr=true;lx=e.clientX;ly=e.clientY};
+onmousemove=e=>{if(!dr)return;tT-=(e.clientX-lx)*.005;tP+=(e.clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.clientX;ly=e.clientY};
+onmouseup=()=>dr=false;
+C.onwheel=e=>{e.preventDefault();tD*=1+e.deltaY*.0012;tD=Math.max(8,Math.min(200,tD))};
+C.addEventListener('touchstart',e=>{if(e.touches.length===1){dr=true;lx=e.touches[0].clientX;ly=e.touches[0].clientY}else if(e.touches.length===2){dr=false;pd=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY)}},{passive:false});
+C.addEventListener('touchmove',e=>{e.preventDefault();if(e.touches.length===1&&dr){tT-=(e.touches[0].clientX-lx)*.005;tP+=(e.touches[0].clientY-ly)*.005;tP=Math.max(-1.45,Math.min(1.45,tP));lx=e.touches[0].clientX;ly=e.touches[0].clientY}else if(e.touches.length===2){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);tD*=1-(d-pd)*.004;tD=Math.max(8,Math.min(200,tD));pd=d}},{passive:false});
+C.addEventListener('touchend',()=>dr=false);
+
+const t0=performance.now();let ok=false;
+!function loop(){
+  requestAnimationFrame(loop);
+  const t=(performance.now()-t0)*.001;
+  if(!ok&&t>.8){document.getElementById('ld').classList.add('h');ok=true}
+  tT+=.0004;
+  th+=(tT-th)*.07;ph+=(tP-ph)*.07;di+=(tD-di)*.07;
+  const cx=Math.cos(ph)*Math.sin(th)*di, cy=Math.sin(ph)*di, cz=Math.cos(ph)*Math.cos(th)*di;
+  gl.uniform1f(uT,t);gl.uniform2f(uR,C.width,C.height);gl.uniform3f(uC,cx,cy,cz);
+  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+  const d=Math.sqrt(cx*cx+cy*cy+cz*cz);
+  document.getElementById('hd').textContent=d.toFixed(1)+' Rs';
+  document.getElementById('hz').textContent='z = '+(1/Math.sqrt(Math.max(1-3/d,.001))-1).toFixed(4);
+}();
+</script>
+</body>
+</html>
