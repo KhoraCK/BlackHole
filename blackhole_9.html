@@ -188,8 +188,8 @@ void main(){
   // ==============================================
   float b_impact=length(cross(pos,vel));
   if(b_impact<B_CRIT*.45){
-    // Tone-mapped black: ACES maps 0 -> 0.03/0.14 = 0.2143, gamma -> 0.247
-    gl_FragColor=vec4(vec3(.247),.0);
+    // ACES: x*(2.51x+.03) / (x*(2.43x+.59)+.14) -> 0/0.14 = 0 when x=0
+    gl_FragColor=vec4(vec3(0.),1.);
     return;
   }
 
